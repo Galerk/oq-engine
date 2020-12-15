@@ -72,6 +72,14 @@ class BetaDistributionTestCase(unittest.TestCase):
         self.assertIn('zero coefficient of variation in [0.  0.2 0.3]',
                       str(ctx.exception))
 
+    def test_mean_one(self):
+        vf = scientific.VulnerabilityFunction(
+            'v1', 'PGA', [.1, .2, .3], [1, .1, .2], [0, .2, .3], 'BT')
+        vf.seed = 42
+        vf.init()
+        res = vf(gmvs=[.1, .2, .3], epsilons=[.01, .02, .03])
+        numpy.testing.assert_allclose(res, [1., 0.10940026, 0.18881634])
+
 
 epsilons = scientific.make_epsilons(
     numpy.zeros((1, 3)), seed=3, correlation=0)[0]

@@ -135,7 +135,7 @@ class VulnerabilityFunction(object):
                     pass
                 elif lr > 1:
                     raise ValueError('The meanLRs must be ≤ 1, got %s' % lr)
-                elif cov == 0:
+                elif cov == 0 and lr != 1:
                     raise ValueError(
                         'Found a zero coefficient of variation in %s' %
                         self.covs)
@@ -143,7 +143,7 @@ class VulnerabilityFunction(object):
                     # see https://github.com/gem/oq-engine/issues/4841
                     raise ValueError(
                         'The coefficient of variation %s > %s does not '
-                        'satisfy the requirement 0 < σ < sqrt[μ × (1 - μ)] ' 
+                        'satisfy the requirement 0 < σ < sqrt[μ × (1 - μ)] '
                         'in %s' % (cov, numpy.sqrt(1 / lr - 1), self))
 
         self.distribution_name = distribution
@@ -846,9 +846,15 @@ class LogNormalDistribution(Distribution):
 @DISTRIBUTIONS.add('BT')
 class BetaDistribution(Distribution):
     def sample(self, means, _covs, stddevs, _idxs=None):
-        alpha = self._alpha(means, stddevs)
-        beta = self._beta(means, stddevs)
-        res = numpy.random.beta(alpha, beta, size=None)
+        ok = means != 1  # regular case
+        res = numpy.zeros_like(means)
+        means_ok = means[ok]
+        stddevs_ok = stddevs[ok]
+        x = ((1 - means_ok) / stddevs_ok ** 2 - 1 / means_ok)
+        alpha = x * means_ok ** 2
+        beta = x * (means_ok - means_ok ** 2)
+        res[ok] = numpy.random.beta(alpha, beta)
+        res[~ok] = 1  # 1 on the singular points
         return res
 
     def survival(self, loss_ratio, mean, stddev):
