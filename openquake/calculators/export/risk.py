@@ -228,25 +228,13 @@ def export_losses_by_event(ekey, dstore):
         md.update(dict(investigation_time=oq.investigation_time,
                        risk_investigation_time=oq.risk_investigation_time))
     events = dstore['events'][()]
-    columns = dict(rlz_id=lambda rec: events[rec.event_id]['rlz_id'])
-    if oq.investigation_time:  # not scenario
-        columns['rup_id'] = lambda rec: events[rec.event_id]['rup_id']
-        columns['year'] = lambda rec: events[rec.event_id]['year']
-    try:
-        lbe = dstore['event_loss_table/,'][()]
-    except KeyError:  # scenario_damage + consequences
-        lbe = dstore['losses_by_event'][()]
-    lbe.sort(order='event_id')
-    dic = dict(shape_descr=['event_id'])
-    dic['event_id'] = list(lbe['event_id'])
-    # example (0, 1, 2, 3) -> (0, 2, 3, 1)
-    axis = [0] + list(range(2, len(lbe['loss'].shape))) + [1]
-    data = lbe['loss'].transpose(axis)  # shape (E, T..., L)
-    aw = hdf5.ArrayWrapper(data, dic, oq.loss_names)
-    table = add_columns(aw.to_table(), **columns)
-    writer.save(table, dest, comment=md)
-    return writer.getsaved()
-
+    alt = dstore.read_df('agg_loss_table', 'agg_id', {'agg_id': 0})
+    evs = events[alt.event_id]
+    alt['rlz_id'] = evs['rlz_id']
+    alt['rup_id'] = evs['rup_id']
+    alt['year'] = evs['year']
+    alt.sort_values('event_id').to_csv(dest, index=False)
+    return [dest]
 
 def _compact(array):
     # convert an array of shape (a, e) into an array of shape (a,)

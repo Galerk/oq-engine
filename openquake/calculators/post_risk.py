@@ -94,12 +94,15 @@ class PostRiskCalculator(base.RiskCalculator):
                                            loss_type=oq.loss_names)
         '''
         builder = get_loss_builder(self.datastore)
-        K = len(self.datastore['agg_loss_table/aggtags'])
+        try:
+            K = len(self.datastore['agg_loss_table/aggtags'])
+        except KeyError:  # no aggregations
+            K = 1
         P = len(builder.return_periods)
         # do everything in process since it is really fast
         rlz_id = self.datastore['events']['rlz_id']
         alt_df = self.datastore.read_df('agg_loss_table', 'agg_id')
-        alt_df['rlz_id'] = rlz_id[alt_df.event_id]
+        alt_df['rlz_id'] = rlz_id[alt_df.event_id.to_numpy()]
         agg_losses = self.datastore.create_dset(
             'agg_losses-rlzs', F32, (K, self.R, self.L))
         agg_curves = self.datastore.create_dset(
@@ -111,10 +114,12 @@ class PostRiskCalculator(base.RiskCalculator):
 
         units = self.datastore['cost_calculator'].get_units(oq.loss_names)
         set_rlzs_stats(self.datastore, 'agg_curves',
+                       agg_id=K, loss_types=oq.loss_names,
                        return_periods=builder.return_periods,
-                       loss_types=oq.loss_names, units=units)
+                       units=units)
         set_rlzs_stats(self.datastore, 'agg_losses',
-                       loss_types=oq.loss_names, units=units)
+                       agg_id=K, loss_types=oq.loss_names,
+                       units=units)
         return 1
 
     def post_execute(self, dummy):
