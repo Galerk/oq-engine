@@ -221,7 +221,6 @@ def export_losses_by_event(ekey, dstore):
     :param dstore: datastore object
     """
     oq = dstore['oqparam']
-    writer = writers.CsvWriter(fmt=writers.FIVEDIGITS)
     dest = dstore.build_fname('losses_by_event', '', 'csv')
     md = dstore.metadata
     if 'scenario' not in oq.calculation_mode:
@@ -229,12 +228,15 @@ def export_losses_by_event(ekey, dstore):
                        risk_investigation_time=oq.risk_investigation_time))
     events = dstore['events'][()]
     alt = dstore.read_df('agg_loss_table', 'agg_id', {'agg_id': 0})
-    evs = events[alt.event_id]
+    evs = events[alt.event_id.to_numpy()]
     alt['rlz_id'] = evs['rlz_id']
-    alt['rup_id'] = evs['rup_id']
-    alt['year'] = evs['year']
-    alt.sort_values('event_id').to_csv(dest, index=False)
+    if oq.investigation_time:  # non-scenario
+        alt['rup_id'] = evs['rup_id']
+        alt['year'] = evs['year']
+    alt.sort_values('event_id').to_csv(dest, index=False,
+                                       float_format=writers.FIVEDIGITS)
     return [dest]
+
 
 def _compact(array):
     # convert an array of shape (a, e) into an array of shape (a,)
