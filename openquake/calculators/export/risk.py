@@ -19,6 +19,7 @@ import json
 import itertools
 import collections
 import numpy
+import pandas
 
 from openquake.baselib import hdf5
 from openquake.baselib.python3compat import decode
@@ -213,7 +214,7 @@ def export_src_loss_table(ekey, dstore):
     return writer.getsaved()
 
 
-# this is used by scenario_risk, event_based_risk and ebrisk
+# this is used by scenario_risk, scenario_damage, event_based_risk and ebrisk
 @export.add(('losses_by_event', 'csv'))
 def export_losses_by_event(ekey, dstore):
     """
@@ -227,7 +228,14 @@ def export_losses_by_event(ekey, dstore):
         md.update(dict(investigation_time=oq.investigation_time,
                        risk_investigation_time=oq.risk_investigation_time))
     events = dstore['events'][()]
-    alt = dstore.read_df('agg_loss_table', 'agg_id', {'agg_id': 0})
+    try:
+        alt = dstore.read_df('agg_loss_table', 'agg_id', {'agg_id': 0})
+    except KeyError:  # for scenario_damage + consequences
+        arr = dstore['losses_by_event']
+        dic = dict(event_id=arr['event_id'], agg_id=numpy.arange(len(arr)))
+        for l, lname in enumerate(oq.loss_names):
+            dic[lname] = arr['loss'][:, l]
+        alt = pandas.DataFrame(dic).set_index('agg_id')
     evs = events[alt.event_id.to_numpy()]
     alt['rlz_id'] = evs['rlz_id']
     if oq.investigation_time:  # non-scenario
