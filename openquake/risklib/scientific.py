@@ -1439,21 +1439,9 @@ class LossCurvesMapsBuilder(object):
         return self.pair(array, stats)
 
     # used in post_risk
-    def build_curves(self, loss_arrays, rlzi):
-        if len(loss_arrays) == 0:
-            return ()
-        shp = loss_arrays[0].shape  # (L, T...)
-        P = len(self.return_periods)
-        curves = numpy.zeros((P,) + shp, F32)
-        num_events = self.num_events.get(rlzi, 0)
-        acc = collections.defaultdict(list)
-        for loss_array in loss_arrays:
-            for idx, loss in numpy.ndenumerate(loss_array):
-                acc[idx].append(loss)
-        for idx, losses in acc.items():
-            curves[(slice(None),) + idx] = losses_by_period(
-                losses, self.return_periods, num_events, self.eff_time)
-        return curves
+    def build_curves(self, losses, rlzi):
+        return losses_by_period(
+            losses, self.return_periods, self.num_events[rlzi], self.eff_time)
 
 
 class EventLossTable(AccumDict):

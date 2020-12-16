@@ -59,11 +59,9 @@ def calc_risk(gmfs, param, monitor):
     with monitor('getting crmodel'):
         crmodel = monitor.read('crmodel')
         weights = dstore['weights'][()]
-    L = len(param['elt'].loss_names)
-    aggkey = param['aggkey']
-    elt_dt = [('event_id', U32), ('loss', (F32, (L,)))]
     acc = dict(events_per_sid=0)
     elt = param['elt']
+    alt_dt = param['oqparam'].alt_dt()
     tempname = param['tempname']
     aggby = param['aggregate_by']
     haz_by_sid = general.group_array(gmfs, 'sid')
@@ -96,13 +94,14 @@ def calc_risk(gmfs, param, monitor):
                     losses_by_A[assets['ordinal'], lni] += out[ln] @ ws
     if len(gmfs):
         acc['events_per_sid'] /= len(gmfs)
-    acc['alt'] = alt = {}
-    for key, k in aggkey.items():
-        s = ','.join(map(str, key)) + ','
-        alt[s] = numpy.array([(eid, arr[k]) for eid, arr in elt.items()
-                              if arr[k].sum()], elt_dt)
-        # in the demo there are 264/1694 nonzero events, i.e. arr[k].sum()
-        # is zero most of the time
+    out = []
+    for eid, arr in elt.items():
+        for k, vals in enumerate(arr):  # arr has shape K, L'
+            if vals.sum() > 0:
+                # in the demo there are 264/1694 nonzero events, i.e.
+                # vals.sum() is zero most of the time
+                out.append((eid, k) + tuple(vals))
+    acc['alt'] = numpy.array(out, alt_dt)
     if param['avg_losses']:
         acc['losses_by_A'] = losses_by_A * param['ses_ratio']
     return acc
@@ -163,16 +162,16 @@ def _aggkey_aggtags(tagcol, aggby):
     # aggkey is a dictionary tuple of indices -> index
     # aggtags a list of tags associated to the aggregate_by choices
     aggkey = {(): 0}
-    aggtags = [['' for tagname in aggby]]
+    aggtags = [tuple('' for tagname in aggby)]
     if not aggby:
         return aggkey, aggtags
     alltags = [getattr(tagcol, tagname) for tagname in aggby]
     ranges = [range(1, len(tags)) for tags in alltags]
     i = 1
     for idxs in itertools.product(*ranges):
-        lst = [tags[idx] for idx, tags in zip(idxs, alltags)]
+        tup = tuple(tags[idx] for idx, tags in zip(idxs, alltags))
         aggkey[idxs] = i
-        aggtags.append(lst)
+        aggtags.append(tup)
         i += 1
     if len(aggkey) >= TWO16:
         raise ValueError('Too many aggregation tags: %d >= %d' %
@@ -200,10 +199,6 @@ class EbriskCalculator(event_based.EventBasedCalculator):
                 InsuredLosses(self.policy_name, self.policy_dict))
         self.aggkey, aggtags = _aggkey_aggtags(
             self.assetcol.tagcol, oq.aggregate_by)
-        logging.info('Building %d event loss table(s)', len(self.aggkey))
-        if len(self.aggkey) > oq.max_num_loss_curves:
-            logging.warning('Too many aggregations, the performance will be '
-                            'bad on a cluster!')
         self.param['elt'] = elt = EventLossTable(
             self.aggkey, oq.loss_dt().names, sec_losses)
         self.param['ses_ratio'] = oq.ses_ratio
@@ -219,12 +214,17 @@ class EbriskCalculator(event_based.EventBasedCalculator):
             logging.warning('The calculation is really big; consider setting '
                             'minimum_asset_loss')
 
-        elt_dt = [('event_id', U32), ('loss', (F32, (L,)))]
-        for idxs, tag in zip(self.aggkey, aggtags):
-            idx = ','.join(map(str, idxs)) + ','
-            self.datastore.create_dset('event_loss_table/' + idx, elt_dt,
-                                       attrs=dict(zip(oq.aggregate_by, tag)))
-        self.param['aggkey'] = self.aggkey
+        cols = ['event_id', 'agg_id']
+        self.datastore.create_dset('agg_loss_table/event_id', U32)
+        self.datastore.create_dset('agg_loss_table/agg_id', U16)
+        for name in oq.loss_names:
+            cols.append(name)
+            self.datastore.create_dset('agg_loss_table/' + name, F32)
+        self.datastore['agg_loss_table'].attrs['__pdcolumns__'] = \
+            ' '.join(cols)
+        dt = [(name, hdf5.vstr) for name in oq.aggregate_by]
+        dset = self.datastore.create_dset('agg_loss_table/aggtags', dt)
+        hdf5.extend(dset, numpy.array(aggtags, dt))
         self.param.pop('oqparam', None)  # unneeded
         self.datastore.create_dset('avg_losses-stats', F32, (A, 1, L),
                                    attrs=dict(stat=[b'mean']))  # mean
@@ -273,8 +273,7 @@ class EbriskCalculator(event_based.EventBasedCalculator):
         gmf_bytes = self.datastore['gmf_info']['gmfbytes'].sum()
         logging.info(
             'Produced %s of GMFs', general.humansize(gmf_bytes))
-        dgrp = self.datastore['event_loss_table']
-        e = int(numpy.mean([len(dset) for dset in dgrp.values()]))
+        e = len(self.datastore['agg_loss_table/event_id'])
         logging.info('Nonzero {:_d} / {:_d} events'.format(e, self.E))
         return 1
 
@@ -288,9 +287,10 @@ class EbriskCalculator(event_based.EventBasedCalculator):
         if not dic:
             return
         self.oqparam.ground_motion_fields = False  # hack
-        with self.monitor('saving losses_by_event and event_loss_table'):
-            for key, arr in dic['alt'].items():
-                hdf5.extend(self.datastore['event_loss_table/' + key], arr)
+        with self.monitor('saving losses_by_event and agg_loss_table'):
+            arr = dic['alt']
+            for name in arr.dtype.names:
+                hdf5.extend(self.datastore['agg_loss_table/' + name], arr[name])
         if self.oqparam.avg_losses:
             with self.monitor('saving avg_losses'):
                 self.datastore['avg_losses-stats'][:, 0] += dic['losses_by_A']
