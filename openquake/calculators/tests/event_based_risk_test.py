@@ -45,7 +45,7 @@ def aae(data, expected):
 class EventBasedRiskTestCase(CalculatorTestCase):
 
     def check_attr(self, name, value):
-        got = self.calc.datastore.get_attr('tot_curves-stats', name)
+        got = self.calc.datastore.get_attr('agg_curves-stats', name)
         numpy.testing.assert_equal(value, got)
 
     def assert_stats_ok(self, pkg, job_ini):
@@ -81,7 +81,7 @@ class EventBasedRiskTestCase(CalculatorTestCase):
             self.assertEqualFiles('expected/' + strip_calc_id(fname), fname,
                                   delta=1E-5)
 
-        # make sure the tot_curves-stats has the right attrs
+        # make sure the agg_curves-stats has the right attrs
         self.check_attr('return_periods', [30, 60, 120, 240, 480, 960])
         self.check_attr('units', ['EUR', 'EUR'])
 
@@ -435,8 +435,8 @@ class EventBasedRiskTestCase(CalculatorTestCase):
         [fname] = out['agg_curves-rlzs', 'csv']
         self.assertEqualFiles('expected/agg_curves_eb.csv', fname, delta=1E-5)
 
-        curves = self.calc.datastore.read_df('agg_curves-rlzs', 'NAME_1')
-        self.assertEqual(len(curves), 12)  # 2 names x 6 periods
+        #curves = self.calc.datastore.read_df('agg_curves-rlzs', 'agg_id')
+        #self.assertEqual(len(curves), 12)  # 2 names x 6 periods
 
         # regenerate loss curves and maps
         out = self.run_calc(

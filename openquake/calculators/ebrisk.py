@@ -17,12 +17,10 @@
 # along with OpenQuake. If not, see <http://www.gnu.org/licenses/>.
 import logging
 import operator
-import itertools
 from datetime import datetime
 import numpy
 
 from openquake.baselib import datastore, hdf5, parallel, general
-from openquake.baselib.python3compat import zip
 from openquake.risklib.scientific import EventLossTable, InsuredLosses
 from openquake.risklib.riskinput import (
     cache_epsilons, get_assets_by_taxo, get_output)
@@ -158,27 +156,6 @@ def ebrisk(rupgetter, param, monitor):
     return res
 
 
-def _aggkey_aggtags(tagcol, aggby):
-    # aggkey is a dictionary tuple of indices -> index
-    # aggtags a list of tags associated to the aggregate_by choices
-    aggkey = {(): 0}
-    aggtags = [tuple('' for tagname in aggby)]
-    if not aggby:
-        return aggkey, aggtags
-    alltags = [getattr(tagcol, tagname) for tagname in aggby]
-    ranges = [range(1, len(tags)) for tags in alltags]
-    i = 1
-    for idxs in itertools.product(*ranges):
-        tup = tuple(tags[idx] for idx, tags in zip(idxs, alltags))
-        aggkey[idxs] = i
-        aggtags.append(tup)
-        i += 1
-    if len(aggkey) >= TWO16:
-        raise ValueError('Too many aggregation tags: %d >= %d' %
-                         (len(aggkey), TWO16))
-    return aggkey, aggtags
-
-
 @base.calculators.add('ebrisk')
 class EbriskCalculator(event_based.EventBasedCalculator):
     """
@@ -197,7 +174,7 @@ class EbriskCalculator(event_based.EventBasedCalculator):
         if self.policy_dict:
             sec_losses.append(
                 InsuredLosses(self.policy_name, self.policy_dict))
-        self.aggkey, aggtags = _aggkey_aggtags(
+        self.aggkey, self.aggtags = base._aggkey_aggtags(
             self.assetcol.tagcol, oq.aggregate_by)
         self.param['elt'] = elt = EventLossTable(
             self.aggkey, oq.loss_dt().names, sec_losses)
@@ -224,7 +201,7 @@ class EbriskCalculator(event_based.EventBasedCalculator):
             ' '.join(cols)
         dt = [(name, hdf5.vstr) for name in oq.aggregate_by]
         dset = self.datastore.create_dset('agg_loss_table/aggtags', dt)
-        hdf5.extend(dset, numpy.array(aggtags, dt))
+        hdf5.extend(dset, numpy.array(self.aggtags, dt))
         self.param.pop('oqparam', None)  # unneeded
         self.datastore.create_dset('avg_losses-stats', F32, (A, 1, L),
                                    attrs=dict(stat=[b'mean']))  # mean
@@ -273,7 +250,7 @@ class EbriskCalculator(event_based.EventBasedCalculator):
         gmf_bytes = self.datastore['gmf_info']['gmfbytes'].sum()
         logging.info(
             'Produced %s of GMFs', general.humansize(gmf_bytes))
-        e = len(self.datastore['agg_loss_table/event_id'])
+        e = len(numpy.unique(self.datastore['agg_loss_table/event_id']))
         logging.info('Nonzero {:_d} / {:_d} events'.format(e, self.E))
         return 1
 
@@ -290,7 +267,8 @@ class EbriskCalculator(event_based.EventBasedCalculator):
         with self.monitor('saving losses_by_event and agg_loss_table'):
             arr = dic['alt']
             for name in arr.dtype.names:
-                hdf5.extend(self.datastore['agg_loss_table/' + name], arr[name])
+                dset = self.datastore['agg_loss_table/' + name]
+                hdf5.extend(dset, arr[name])
         if self.oqparam.avg_losses:
             with self.monitor('saving avg_losses'):
                 self.datastore['avg_losses-stats'][:, 0] += dic['losses_by_A']

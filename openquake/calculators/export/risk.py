@@ -75,35 +75,39 @@ def tag2idx(tags):
             ('tot_curves-rlzs', 'csv'), ('tot_curves-stats', 'csv'))
 def export_agg_curve_rlzs(ekey, dstore):
     oq = dstore['oqparam']
-    assetcol = dstore['assetcol']
-    aggregate_by = oq.aggregate_by
+    if ekey[0].startswith('agg_'):
+        name = ekey[0]
+        aggregate_by = oq.aggregate_by
+        aggtags = dstore['agg_loss_table/aggtags'][()]
+    else:
+        name = 'agg_' + ekey[0][4:]
+        aggregate_by = []
+    aggvalue = dstore['exposed_values'][()]
 
-    name = '_'.join(['agg'] + aggregate_by)
-    aggvalue = dstore['exposed_values/' + name][()]
+    def get_loss_ratio(rec, lti=oq.lti):
+        return rec.loss_value / aggvalue[rec.agg_ids, lti[rec.loss_types]]
 
-    aggcurves = dstore[ekey[0]][()]  # shape (K, R, L, P)
-    # alt['loss_ratio'] = 
-    lti = tag2idx(oq.loss_names)
-    tagi = {tagname: tag2idx(getattr(assetcol.tagcol, tagname))
-            for tagname in aggregate_by}
-
-    def get_loss_ratio(rec):
-        idxs = tuple(tagi[tagname][getattr(rec, tagname)] - 1
-                     for tagname in aggregate_by) + (lti[rec.loss_types],)
-        return rec.loss_value / aggvalue[idxs]
-
-    # shape (T1, T2, ..., L)
     md = dstore.metadata
     md.update(dict(
         kind=ekey[0], risk_investigation_time=oq.risk_investigation_time))
     fname = dstore.export_path('%s.%s' % ekey)
     writer = writers.CsvWriter(fmt=writers.FIVEDIGITS)
-    aw = hdf5.ArrayWrapper.from_(dstore[ekey[0]], 'loss_value')
-    table = add_columns(
-        aw.to_table(), loss_ratio=get_loss_ratio,
+    aw = hdf5.ArrayWrapper.from_(dstore[name], 'loss_value')
+    coldict = dict(
+        loss_ratio=get_loss_ratio,
         annual_frequency_of_exceedence=lambda rec: 1 / rec.return_periods)
-    table[0] = [c[:-1] if c.endswith('s') else c for c in table[0]]
-    writer.save(table, fname, comment=md)
+    for name in aggregate_by:
+        coldict[name] = lambda rec, name=name: aggtags[rec.agg_ids][name]
+    table = add_columns(aw.to_table(), **coldict)
+    header = [c[:-1] if c.endswith('s') else c for c in table[0][1:]]
+    if aggregate_by:
+        # strip agg_id, take agg_id > 0
+        writer.save([row[1:] for row in table[1:] if row[0]], fname, header,
+                    comment=md)
+    else:
+        # strip agg_id, take agg_id == 0
+        writer.save([row[1:] for row in table[1:] if row[0] == 0], fname,
+                    header, comment=md)
     return [fname]
 
 

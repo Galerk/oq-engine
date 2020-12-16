@@ -846,8 +846,9 @@ class HazardCalculator(BaseCalculator):
 
         # compute exposure stats
         if hasattr(self, 'assetcol'):
-            save_exposed_values(
-                self.datastore, self.assetcol, oq.loss_names, oq.aggregate_by)
+            self.aggkey, self.aggtags = _aggkey_aggtags(
+                self.assetcol.tagcol, oq.aggregate_by)
+            self.save_exposed_values(oq.loss_names)
 
     def store_rlz_info(self, eff_ruptures):
         """
@@ -903,6 +904,19 @@ class HazardCalculator(BaseCalculator):
         hdf5.extend(self.datastore['source_info'],
                     numpy.array(recs, readinput.source_info_dt))
         return [rec[0] for rec in recs]  # return source_ids
+
+    def save_exposed_values(self, lossnames):
+        """
+        Store an array with the aggregated exposure values
+        """
+        K, L = len(self.aggtags), len(lossnames)
+        exposed_values = numpy.zeros((K, L))
+        aval = self.assetcol.arr_value(lossnames)  # shape (A, L)
+        tagnames = self.oqparam.aggregate_by
+        exposed_values[0, :] = self.assetcol.aggregate_by([], aval)
+        if tagnames:
+            exposed_values[1:K, :] = self.assetcol.aggregate_by(tagnames, aval)
+        self.datastore['exposed_values'] = exposed_values
 
     def post_process(self):
         """For compatibility with the engine"""
@@ -1153,21 +1167,22 @@ def create_gmf_data(dstore, M, secperils=(), data=None):
     dstore.getitem('gmf_data').attrs['__pdcolumns__'] = ' '.join(cols)
 
 
-def save_exposed_values(dstore, assetcol, lossnames, tagnames):
-    """
-    Store 2^n arrays where n is the number of tagNames. For instance with
-    the tags country, occupancy it stores 2^2 = 4 arrays:
-
-    exposed_values/agg_country_occupancy  # shape (T1, T2, L)
-    exposed_values/agg_country            # shape (T1, L)
-    exposed_values/agg_occupancy          # shape (T2, L)
-    exposed_values/agg                    # shape (L,)
-    """
-    aval = assetcol.arr_value(lossnames)  # shape (A, L)
-    for n in range(len(tagnames) + 1, -1, -1):
-        for names in itertools.combinations(tagnames, n):
-            name = 'exposed_values/' + '_'.join(('agg',) + names)
-            dstore[name] = assetcol.aggregate_by(list(names), aval)
-            attrs = {tagname: getattr(assetcol.tagcol, tagname)[1:]
-                     for tagname in names}
-            dstore.set_shape_attrs(name, **attrs, loss_name=lossnames)
+def _aggkey_aggtags(tagcol, aggby):
+    # aggkey is a dictionary tuple of indices -> index
+    # aggtags a list of tags associated to the aggregate_by choices
+    aggkey = {(): 0}
+    aggtags = [tuple('' for tagname in aggby)]
+    if not aggby:
+        return aggkey, aggtags
+    alltags = [getattr(tagcol, tagname) for tagname in aggby]
+    ranges = [range(1, len(tags)) for tags in alltags]
+    i = 1
+    for idxs in itertools.product(*ranges):
+        tup = tuple(tags[idx] for idx, tags in zip(idxs, alltags))
+        aggkey[idxs] = i
+        aggtags.append(tup)
+        i += 1
+    if len(aggkey) >= TWO16:
+        raise ValueError('Too many aggregation tags: %d >= %d' %
+                         (len(aggkey), TWO16))
+    return aggkey, aggtags

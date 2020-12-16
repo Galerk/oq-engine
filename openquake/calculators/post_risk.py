@@ -114,12 +114,11 @@ class PostRiskCalculator(base.RiskCalculator):
 
         units = self.datastore['cost_calculator'].get_units(oq.loss_names)
         set_rlzs_stats(self.datastore, 'agg_curves',
-                       agg_id=K, loss_types=oq.loss_names,
+                       agg_ids=K, loss_types=oq.loss_names,
                        return_periods=builder.return_periods,
                        units=units)
         set_rlzs_stats(self.datastore, 'agg_losses',
-                       agg_id=K, loss_types=oq.loss_names,
-                       units=units)
+                       agg_ids=K, loss_types=oq.loss_names, units=units)
         return 1
 
     def post_execute(self, dummy):
