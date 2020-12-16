@@ -71,19 +71,17 @@ def tag2idx(tags):
 
 
 # this is used by event_based_risk and ebrisk
-@export.add(('agg_curves-rlzs', 'csv'), ('agg_curves-stats', 'csv'),
-            ('tot_curves-rlzs', 'csv'), ('tot_curves-stats', 'csv'))
+@export.add(('agg_curves-rlzs', 'csv'), ('agg_curves-stats', 'csv'))
 def export_agg_curve_rlzs(ekey, dstore):
     oq = dstore['oqparam']
     assetcol = dstore['assetcol']
-    if ekey[0].startswith('agg_'):
-        aggregate_by = oq.aggregate_by
-    else:  # tot_curves
-        aggregate_by = []
+    aggregate_by = oq.aggregate_by
 
     name = '_'.join(['agg'] + aggregate_by)
     aggvalue = dstore['exposed_values/' + name][()]
 
+    aggcurves = dstore[ekey[0]][()]  # shape (K, R, L, P)
+    # alt['loss_ratio'] = 
     lti = tag2idx(oq.loss_names)
     tagi = {tagname: tag2idx(getattr(assetcol.tagcol, tagname))
             for tagname in aggregate_by}
@@ -105,7 +103,7 @@ def export_agg_curve_rlzs(ekey, dstore):
         annual_frequency_of_exceedence=lambda rec: 1 / rec.return_periods)
     table[0] = [c[:-1] if c.endswith('s') else c for c in table[0]]
     writer.save(table, fname, comment=md)
-    return writer.getsaved()
+    return [fname]
 
 
 def _get_data(dstore, dskey, stats):
