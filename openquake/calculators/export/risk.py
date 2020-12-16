@@ -71,7 +71,8 @@ def tag2idx(tags):
 
 
 # this is used by event_based_risk and ebrisk
-@export.add(('agg_curves-rlzs', 'csv'), ('agg_curves-stats', 'csv'))
+@export.add(('agg_curves-rlzs', 'csv'), ('agg_curves-stats', 'csv'),
+            ('tot_curves-rlzs', 'csv'), ('tot_curves-stats', 'csv'))
 def export_agg_curve_rlzs(ekey, dstore):
     oq = dstore['oqparam']
     assetcol = dstore['assetcol']
