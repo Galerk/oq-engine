@@ -845,10 +845,9 @@ class HazardCalculator(BaseCalculator):
                           minimum_asset_loss=mal)
 
         # compute exposure stats
-        if hasattr(self, 'assetcol'):
-            self.aggkey, self.aggtags = _aggkey_aggtags(
-                self.assetcol.tagcol, oq.aggregate_by)
-            self.save_exposed_values(oq.loss_names)
+        if hasattr(self, 'assetcol') and oq.aggregate_by:
+            self.aggkey = self.assetcol.tagcol.get_aggkey(oq.aggregate_by)
+            self.save_aggvalues(oq.loss_names)
 
     def store_rlz_info(self, eff_ruptures):
         """
@@ -905,23 +904,21 @@ class HazardCalculator(BaseCalculator):
                     numpy.array(recs, readinput.source_info_dt))
         return [rec[0] for rec in recs]  # return source_ids
 
-    def save_exposed_values(self, lossnames):
+    def save_aggvalues(self, lossnames):
         """
-        Store an array with the aggregated exposure values
+        Store aggkeys, aggvalues
         """
-        K, L = len(self.aggtags), len(lossnames)
-        exposed_values = numpy.zeros((K, L))
-        aval = self.assetcol.arr_value(lossnames)  # shape (A, L')
-        exposed_values[0] = aval.sum(axis=0)
+        K, L = len(self.aggkey), len(lossnames)
+        aggvalues = numpy.zeros((K, L))
         tagnames = self.oqparam.aggregate_by
-        if tagnames:
-            df = self.assetcol.agg_value(lossnames, *tagnames)
-            for key, df in df.groupby(df.index):
-                if isinstance(key, int):
-                    key = key,  # turn into a tuple
-                for l, ln in enumerate(lossnames):
-                    exposed_values[self.aggkey[key], l] = df[ln].sum()
-        self.datastore['exposed_values'] = exposed_values
+        kid = {key: k for k, key in enumerate(self.aggkey)}
+        for key, arr in self.assetcol.agg_value(lossnames, *tagnames):
+            aggvalues[kid[key]] = arr
+        self.datastore['assetcol/aggvalues'] = aggvalues
+        dt = [(name + '_', U16) for name in tagnames] + [
+            (name, hdf5.vstr) for name in tagnames]
+        kvs = [key + val for key, val in self.aggkey.items()]
+        self.datastore['assetcol/aggkeys'] = numpy.array(kvs, dt)
 
     def post_process(self):
         """For compatibility with the engine"""
@@ -1170,22 +1167,3 @@ def create_gmf_data(dstore, M, secperils=(), data=None):
             dstore.create_dset(f'gmf_data/{out}', F32)
             cols.append(f'{out}')
     dstore.getitem('gmf_data').attrs['__pdcolumns__'] = ' '.join(cols)
-
-
-def _aggkey_aggtags(tagcol, aggby):
-    # aggkey is a dictionary tuple of indices -> index
-    # aggtags a list of tags associated to the aggregate_by choices
-    aggkey = {(): 0}
-    aggtags = [tuple('' for tagname in aggby)]
-    if not aggby:
-        return aggkey, aggtags
-    alltags = [getattr(tagcol, tagname) for tagname in aggby]
-    ranges = [range(1, len(tags)) for tags in alltags]
-    for i, idxs in enumerate(itertools.product(*ranges), 1):
-        tup = tuple(tags[idx] for idx, tags in zip(idxs, alltags))
-        aggkey[idxs] = i
-        aggtags.append(tup)
-    if len(aggkey) >= TWO16:
-        raise ValueError('Too many aggregation tags: %d >= %d' %
-                         (len(aggkey), TWO16))
-    return aggkey, aggtags

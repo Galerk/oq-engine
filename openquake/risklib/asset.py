@@ -30,6 +30,14 @@ from openquake.baselib.python3compat import encode, decode
 from openquake.hazardlib import valid, nrml, geo, InvalidFile
 from openquake.risklib import countries
 
+U8 = numpy.uint8
+U32 = numpy.uint32
+F32 = numpy.float32
+U64 = numpy.uint64
+TWO16 = 2 ** 16
+TWO32 = 2 ** 32
+by_taxonomy = operator.attrgetter('taxonomy')
+
 
 def get_case_similar(names):
     """
@@ -203,14 +211,6 @@ class Asset(object):
         return '<Asset #%s>' % self.ordinal
 
 
-U8 = numpy.uint8
-U32 = numpy.uint32
-F32 = numpy.float32
-U64 = numpy.uint64
-TWO32 = 2 ** 32
-by_taxonomy = operator.attrgetter('taxonomy')
-
-
 class TagCollection(object):
     """
     An iterable collection of tags in the form "tagname=tagvalue".
@@ -305,6 +305,21 @@ class TagCollection(object):
         """
         return {tagname: getattr(self, tagname)[tagidx]
                 for tagidx, tagname in zip(tagidxs, self.tagnames)}
+
+    def get_aggkey(self, tagnames):
+        """
+        :returns: a dictionary tuple of indices -> tagvalues
+        """
+        aggkey = {}
+        alltags = [getattr(self, tagname) for tagname in tagnames]
+        ranges = [range(1, len(tags)) for tags in alltags]
+        for i, idxs in enumerate(itertools.product(*ranges)):
+            tup = tuple(tags[idx] for idx, tags in zip(idxs, alltags))
+            aggkey[idxs] = tup
+        if len(aggkey) >= TWO16:
+            raise ValueError('Too many aggregation tags: %d >= %d' %
+                             (len(aggkey), TWO16))
+        return aggkey
 
     def gen_tags(self, tagname):
         """
@@ -467,8 +482,8 @@ class AssetCollection(object):
             the relevant loss_names
         :param tagnames:
             tagnames
-        :returns:
-            the values of the exposure aggregated by tagnames as a DataFrame
+        :yields:
+            pairs (key, aggvalues)
         """
         dic = {tagname: self[tagname] for tagname in tagnames}
         for ln in loss_names:
@@ -476,7 +491,11 @@ class AssetCollection(object):
                 dic[ln] = self['value-' + ln[:-4]]
             elif ln in self.fields:
                 dic[ln] = self['value-' + ln]
-        return pandas.DataFrame(dic).set_index(list(tagnames))
+        df = pandas.DataFrame(dic).set_index(list(tagnames))
+        for key, grp in df.groupby(df.index):
+            if isinstance(key, int):
+                key = key,  # turn it into a 1-value tuple
+            yield key, numpy.array(grp.sum())
 
     def reduce(self, sitecol):
         """

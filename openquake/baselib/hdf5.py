@@ -555,7 +555,7 @@ class ArrayWrapper(object):
         idxs = []
         for i, tagname in enumerate(shape_descr):
             values = getattr(self, tagname)
-            if len(values) != shape[i]:
+            if len(values) > shape[i]:
                 raise ValueError(
                     'The tag %s with %d values is inconsistent with %s'
                     % (tagname, len(values), self))

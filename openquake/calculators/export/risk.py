@@ -71,21 +71,16 @@ def tag2idx(tags):
 
 
 # this is used by event_based_risk and ebrisk
-@export.add(('agg_curves-rlzs', 'csv'), ('agg_curves-stats', 'csv'),
-            ('tot_curves-rlzs', 'csv'), ('tot_curves-stats', 'csv'))
+@export.add(('agg_curves-rlzs', 'csv'), ('agg_curves-stats', 'csv'))
 def export_agg_curve_rlzs(ekey, dstore):
     oq = dstore['oqparam']
-    if ekey[0].startswith('agg_'):
-        name = ekey[0]
-        aggregate_by = oq.aggregate_by
-        aggtags = dstore['agg_loss_table/aggtags'][()]
-    else:
-        name = 'agg_' + ekey[0][4:]
-        aggregate_by = []
-    aggvalue = dstore['exposed_values'][()]
+    name = ekey[0]
+    aggregate_by = oq.aggregate_by
+    aggkeys = dstore['assetcol/aggkeys'][()]
+    aggvalues = dstore['assetcol/aggvalues'][()]
 
     def get_loss_ratio(rec, lti=oq.lti):
-        return rec.loss_value / aggvalue[rec.agg_ids, lti[rec.loss_types]]
+        return rec.loss_value / aggvalues[rec.agg_ids, lti[rec.loss_types]]
 
     md = dstore.metadata
     md.update(dict(
@@ -93,21 +88,47 @@ def export_agg_curve_rlzs(ekey, dstore):
     fname = dstore.export_path('%s.%s' % ekey)
     writer = writers.CsvWriter(fmt=writers.FIVEDIGITS)
     aw = hdf5.ArrayWrapper.from_(dstore[name], 'loss_value')
+    aw.agg_ids = aw.agg_ids[:-1]  # discard total losses
     coldict = dict(
         loss_ratio=get_loss_ratio,
         annual_frequency_of_exceedence=lambda rec: 1 / rec.return_periods)
     for name in aggregate_by:
-        coldict[name] = lambda rec, name=name: aggtags[rec.agg_ids][name]
+        coldict[name] = lambda rec, name=name: aggkeys[rec.agg_ids][name]
     table = add_columns(aw.to_table(), **coldict)
+    # strip agg_id and trailing 's'
     header = [c[:-1] if c.endswith('s') else c for c in table[0][1:]]
-    if aggregate_by:
-        # strip agg_id, take agg_id > 0
-        writer.save([row[1:] for row in table[1:] if row[0]], fname, header,
-                    comment=md)
-    else:
-        # strip agg_id, take agg_id == 0
-        writer.save([row[1:] for row in table[1:] if row[0] == 0], fname,
-                    header, comment=md)
+    # strip agg_id
+    writer.save([row[1:] for row in table[1:]], fname, header, comment=md)
+    return [fname]
+
+
+@export.add(('tot_curves-rlzs', 'csv'), ('tot_curves-stats', 'csv'))
+def export_tot_curve_rlzs(ekey, dstore):
+    oq = dstore['oqparam']
+    agg_value = dstore['assetcol'].arr_value(oq.loss_names).sum(axis=0)
+
+    def get_loss_ratio(rec, lti=oq.lti):
+        return rec.loss_value / agg_value[lti[rec.loss_types]]
+
+    md = dstore.metadata
+    md.update(dict(
+        kind=ekey[0], risk_investigation_time=oq.risk_investigation_time))
+    fname = dstore.export_path('%s.%s' % ekey)
+    writer = writers.CsvWriter(fmt=writers.FIVEDIGITS)
+    name = 'agg_' + ekey[0][4:]
+    try:
+        K = len(dstore['assetcol/aggkeys']) + 1
+    except KeyError:
+        K = 1
+    aw = hdf5.ArrayWrapper.from_(dstore[name], 'loss_value')
+    aw.agg_ids = [K]  # keep only total losses
+    coldict = dict(
+        loss_ratio=get_loss_ratio,
+        annual_frequency_of_exceedence=lambda rec: 1 / rec.return_periods)
+    table = add_columns(aw.to_table(), **coldict)
+    # strip agg_id
+    header = [c[:-1] if c.endswith('s') else c for c in table[0][1:]]
+    writer.save([row[1:] for row in table[1:]], fname, header, comment=md)
     return [fname]
 
 
@@ -170,9 +191,7 @@ def export_agg_losses(ekey, dstore):
     name, value, tags = _get_data(dstore, dskey, oq.hazard_stats())
     writer = writers.CsvWriter(fmt=writers.FIVEDIGITS)
     assetcol = dstore['assetcol']
-    aggname = '_'.join(['agg'] + aggregate_by)
-    expvalue = dstore['exposed_values/' + aggname][()]
-    # shape (T1, T2, ..., L)
+    expvalue = dstore['assetcol/aggvalues'][()]
     tagnames = tuple(aggregate_by)
     header = ('loss_type',) + tagnames + (
         'loss_value', 'exposed_value', 'loss_ratio')

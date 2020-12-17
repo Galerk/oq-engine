@@ -95,7 +95,7 @@ class PostRiskCalculator(base.RiskCalculator):
         '''
         builder = get_loss_builder(self.datastore)
         try:
-            K = len(self.datastore['agg_loss_table/aggtags'])
+            K = len(self.datastore['assetcol/aggkeys']) + 1
         except KeyError:  # no aggregations
             K = 1
         P = len(builder.return_periods)
@@ -107,10 +107,11 @@ class PostRiskCalculator(base.RiskCalculator):
             'agg_losses-rlzs', F32, (K, self.R, self.L))
         agg_curves = self.datastore.create_dset(
             'agg_curves-rlzs', F32, (K, self.R, self.L, P))
-        for (k, r), df in alt_df.groupby([alt_df.index, alt_df.rlz_id]):
-            for l, lname in enumerate(oq.loss_names):
-                agg_losses[k, r, l] = df[lname].sum() * oq.ses_ratio
-                agg_curves[k, r, l] = builder.build_curves(df[lname], r)
+        with self.monitor('agg_losses and agg_curves', measuremem=True):
+            for (k, r), df in alt_df.groupby([alt_df.index, alt_df.rlz_id]):
+                for l, lname in enumerate(oq.loss_names):
+                    agg_losses[k, r, l] = df[lname].sum() * oq.ses_ratio
+                    agg_curves[k, r, l] = builder.build_curves(df[lname], r)
 
         units = self.datastore['cost_calculator'].get_units(oq.loss_names)
         set_rlzs_stats(self.datastore, 'agg_curves',
