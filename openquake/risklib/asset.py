@@ -21,6 +21,7 @@ import logging
 import csv
 import os
 import numpy
+import pandas
 from shapely import wkt, geometry
 
 from openquake.baselib import hdf5, general
@@ -417,6 +418,7 @@ class AssetCollection(object):
             assets_by_site[ass['site_id']].append(self[i])
         return numpy.array(assets_by_site)
 
+    # used in the extract API
     def aggregate_by(self, tagnames, array):
         """
         :param tagnames: a list of valid tag names
@@ -434,9 +436,6 @@ class AssetCollection(object):
             return array.sum(axis=0)
         elif len(tagnames) == 1:
             # fast track for single-tag aggregation
-            # for the Canada exposure it is 30x faster
-            # fast_agg(assets['taxonomy'], values)  => 47.6 ms
-            # fast_agg2(assets[['taxonomy']], values) => 1.4 s
             [tagname] = tagnames
             avalues = general.fast_agg(self.array[tagname], array)[1:]
             tagids = [(i + 1,) for i in range(len(avalues))]
@@ -448,32 +447,36 @@ class AssetCollection(object):
             arr[tuple(i - 1 for i in tagid)] = aval
         return arr
 
-    def arr_value(self, loss_types):
+    def arr_value(self, loss_names):
         """
-        :param loss_types: the relevant loss types
+        :param loss_names: the relevant loss types
         :returns: an array of shape (A, L) with the values of the assets
         """
         array = self.array
-        aval = numpy.zeros((len(self), len(loss_types)), F32)  # (A, L)
-        for lti, lt in enumerate(loss_types):
+        aval = numpy.zeros((len(self), len(loss_names)), F32)  # (A, L)
+        for lti, lt in enumerate(loss_names):
             if lt.endswith('_ins'):
                 aval[array['ordinal'], lti] = array['value-' + lt[:-4]]
             elif lt in self.fields:
                 aval[array['ordinal'], lti] = array['value-' + lt]
         return aval
 
-    def agg_value(self, loss_types, *tagnames):
+    def agg_value(self, loss_names, *tagnames):
         """
-        :param loss_types:
-            the relevant loss_types
+        :param loss_names:
+            the relevant loss_names
         :param tagnames:
-            tagnames of lengths T1, T2, ... respectively
+            tagnames
         :returns:
-            the values of the exposure aggregated by tagnames as an array
-            of shape (T1, T2, ..., L)
+            the values of the exposure aggregated by tagnames as a DataFrame
         """
-        aval = self.arr_value(loss_types)
-        return self.aggregate_by(list(tagnames), aval)
+        dic = {tagname: self[tagname] for tagname in tagnames}
+        for ln in loss_names:
+            if ln.endswith('_ins'):
+                dic[ln] = self['value-' + ln[:-4]]
+            elif ln in self.fields:
+                dic[ln] = self['value-' + ln]
+        return pandas.DataFrame(dic).set_index(list(tagnames))
 
     def reduce(self, sitecol):
         """

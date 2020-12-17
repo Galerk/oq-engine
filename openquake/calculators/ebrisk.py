@@ -21,7 +21,7 @@ from datetime import datetime
 import numpy
 
 from openquake.baselib import datastore, hdf5, parallel, general
-from openquake.risklib.scientific import EventLossTable, InsuredLosses
+from openquake.risklib.scientific import AggLossTable, InsuredLosses
 from openquake.risklib.riskinput import (
     cache_epsilons, get_assets_by_taxo, get_output)
 from openquake.commonlib import logs
@@ -176,7 +176,7 @@ class EbriskCalculator(event_based.EventBasedCalculator):
                 InsuredLosses(self.policy_name, self.policy_dict))
         self.aggkey, self.aggtags = base._aggkey_aggtags(
             self.assetcol.tagcol, oq.aggregate_by)
-        self.param['elt'] = elt = EventLossTable(
+        self.param['elt'] = elt = AggLossTable(
             self.aggkey, oq.loss_dt().names, sec_losses)
         self.param['ses_ratio'] = oq.ses_ratio
         self.param['aggregate_by'] = oq.aggregate_by
@@ -200,8 +200,9 @@ class EbriskCalculator(event_based.EventBasedCalculator):
         self.datastore['agg_loss_table'].attrs['__pdcolumns__'] = \
             ' '.join(cols)
         dt = [(name, hdf5.vstr) for name in oq.aggregate_by]
-        dset = self.datastore.create_dset('agg_loss_table/aggtags', dt)
-        hdf5.extend(dset, numpy.array(self.aggtags, dt))
+        if dt:
+            dset = self.datastore.create_dset('agg_loss_table/aggtags', dt)
+            hdf5.extend(dset, numpy.array(self.aggtags, dt))
         self.param.pop('oqparam', None)  # unneeded
         self.datastore.create_dset('avg_losses-stats', F32, (A, 1, L),
                                    attrs=dict(stat=[b'mean']))  # mean

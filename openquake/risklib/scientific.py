@@ -1444,7 +1444,7 @@ class LossCurvesMapsBuilder(object):
             losses, self.return_periods, self.num_events[rlzi], self.eff_time)
 
 
-class EventLossTable(AccumDict):
+class AggLossTable(AccumDict):
     """
     A dictionary of matrices of shape (K, L'), with K the number of aggregation
     keys and L' the total number of loss types (primary + secondary).

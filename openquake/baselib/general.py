@@ -1017,6 +1017,10 @@ def multi_index(shape, axis=None):
         yield tuple(lst)
 
 
+# fast track for single-tag aggregation
+# for the Canada exposure fast_agg it is 30x faster
+# fast_agg(assets['taxonomy'], values)  => 47.6 ms
+# fast_agg2(assets[['taxonomy']], values) => 1.4 s
 def fast_agg(indices, values=None, axis=0, factor=None):
     """
     :param indices: N indices in the range 0 ... M - 1 with M < N

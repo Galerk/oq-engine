@@ -911,11 +911,16 @@ class HazardCalculator(BaseCalculator):
         """
         K, L = len(self.aggtags), len(lossnames)
         exposed_values = numpy.zeros((K, L))
-        aval = self.assetcol.arr_value(lossnames)  # shape (A, L)
+        aval = self.assetcol.arr_value(lossnames)  # shape (A, L')
+        exposed_values[0] = aval.sum(axis=0)
         tagnames = self.oqparam.aggregate_by
-        exposed_values[0, :] = self.assetcol.aggregate_by([], aval)
         if tagnames:
-            exposed_values[1:K, :] = self.assetcol.aggregate_by(tagnames, aval)
+            df = self.assetcol.agg_value(lossnames, *tagnames)
+            for key, df in df.groupby(df.index):
+                if isinstance(key, int):
+                    key = key,  # turn into a tuple
+                for l, ln in enumerate(lossnames):
+                    exposed_values[self.aggkey[key], l] = df[ln].sum()
         self.datastore['exposed_values'] = exposed_values
 
     def post_process(self):
@@ -1176,12 +1181,10 @@ def _aggkey_aggtags(tagcol, aggby):
         return aggkey, aggtags
     alltags = [getattr(tagcol, tagname) for tagname in aggby]
     ranges = [range(1, len(tags)) for tags in alltags]
-    i = 1
-    for idxs in itertools.product(*ranges):
+    for i, idxs in enumerate(itertools.product(*ranges), 1):
         tup = tuple(tags[idx] for idx, tags in zip(idxs, alltags))
         aggkey[idxs] = i
         aggtags.append(tup)
-        i += 1
     if len(aggkey) >= TWO16:
         raise ValueError('Too many aggregation tags: %d >= %d' %
                          (len(aggkey), TWO16))
