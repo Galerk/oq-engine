@@ -19,7 +19,7 @@
 import logging
 import numpy
 
-from openquake.baselib import general, datastore
+from openquake.baselib import general, datastore, parallel
 from openquake.hazardlib.stats import set_rlzs_stats
 from openquake.risklib import scientific
 from openquake.calculators import base, views
@@ -60,6 +60,13 @@ def get_src_loss_table(dstore, L):
     for source_id, rlz_id, loss in zip(source_id, rlz_ids, alt['loss']):
         acc[source_id] += loss * w[rlz_id]
     return zip(*sorted(acc.items()))
+
+
+def post_risk(builder, krl, losses, monitor):
+    """
+    :returns: dictionary krl -> loss curve
+    """
+    return {krl: builder.build_curves(losses, krl[1])}
 
 
 @base.calculators.add('post_risk')
@@ -103,15 +110,19 @@ class PostRiskCalculator(base.RiskCalculator):
         rlz_id = self.datastore['events']['rlz_id']
         alt_df = self.datastore.read_df('agg_loss_table', 'agg_id')
         alt_df['rlz_id'] = rlz_id[alt_df.event_id.to_numpy()]
-        agg_losses = numpy.zeros((K, self.R, self.L), F32)
-        agg_curves = numpy.zeros((K, self.R, self.L, P), F32)
+        smap = parallel.Starmap(post_risk, h5=self.datastore.hdf5)
         with self.monitor('agg_losses and agg_curves', measuremem=True):
+            agg_losses = numpy.zeros((K, self.R, self.L), F32)
+            agg_curves = numpy.zeros((K, self.R, self.L, P), F32)
             gb = alt_df.groupby([alt_df.index, alt_df.rlz_id])
             logging.info('Computing agg_losses and agg_curves')
             for (k, r), df in gb:
                 for l, lname in enumerate(oq.loss_names):
-                    agg_losses[k, r, l] = df[lname].sum() * oq.ses_ratio
-                    agg_curves[k, r, l] = builder.build_curves(df[lname], r)
+                    krl = k, r, l
+                    agg_losses[krl] = df[lname].sum() * oq.ses_ratio
+                    smap.submit((builder, krl, df[lname]))
+        for krl, arr in smap.reduce().items():
+            agg_curves[krl] = arr
         self.datastore['agg_losses-rlzs'] = agg_losses
         self.datastore['agg_curves-rlzs'] = agg_curves
 
