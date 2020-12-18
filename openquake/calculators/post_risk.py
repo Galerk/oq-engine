@@ -62,11 +62,14 @@ def get_src_loss_table(dstore, L):
     return zip(*sorted(acc.items()))
 
 
-def post_risk(builder, krl, losses, monitor):
+def post_risk(builder, krl_losses, monitor):
     """
     :returns: dictionary krl -> loss curve
     """
-    return {krl: builder.build_curves(losses, krl[1])}
+    res = {}
+    for krl, losses in krl_losses:
+        res[krl] = builder.build_curves(losses, krl[1])
+    return res
 
 
 @base.calculators.add('post_risk')
@@ -111,16 +114,24 @@ class PostRiskCalculator(base.RiskCalculator):
         alt_df = self.datastore.read_df('agg_loss_table', 'agg_id')
         alt_df['rlz_id'] = rlz_id[alt_df.event_id.to_numpy()]
         smap = parallel.Starmap(post_risk, h5=self.datastore.hdf5)
+        num_curves = K * self.R * self.L
+        blocksize = numpy.ceil(num_curves / (oq.concurrent_tasks or 1))
+        krl_losses = []
         with self.monitor('agg_losses and agg_curves', measuremem=True):
             agg_losses = numpy.zeros((K, self.R, self.L), F32)
             agg_curves = numpy.zeros((K, self.R, self.L, P), F32)
             gb = alt_df.groupby([alt_df.index, alt_df.rlz_id])
-            logging.info('Computing agg_losses and agg_curves')
+            logging.info('Computing at max %d curves per task', blocksize)
             for (k, r), df in gb:
                 for l, lname in enumerate(oq.loss_names):
                     krl = k, r, l
                     agg_losses[krl] = df[lname].sum() * oq.ses_ratio
-                    smap.submit((builder, krl, df[lname]))
+                    krl_losses.append((krl, df[lname]))
+                    if len(krl_losses) >= blocksize:
+                        smap.submit((builder, krl_losses))
+                        krl_losses[:] = []
+        if krl_losses:
+            smap.submit((builder, krl_losses))
         for krl, arr in smap.reduce().items():
             agg_curves[krl] = arr
         self.datastore['agg_losses-rlzs'] = agg_losses
