@@ -121,7 +121,8 @@ class PostRiskCalculator(base.RiskCalculator):
             agg_losses = numpy.zeros((K, self.R, self.L), F32)
             agg_curves = numpy.zeros((K, self.R, self.L, P), F32)
             gb = alt_df.groupby([alt_df.index, alt_df.rlz_id])
-            logging.info('Computing at max %d curves per task', blocksize)
+            logging.info('Computing at max %d/%d curves per task',
+                         blocksize, num_curves)
             for (k, r), df in gb:
                 for l, lname in enumerate(oq.loss_names):
                     krl = k, r, l
