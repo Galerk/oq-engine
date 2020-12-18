@@ -113,11 +113,12 @@ class PostRiskCalculator(base.RiskCalculator):
         rlz_id = self.datastore['events']['rlz_id']
         alt_df = self.datastore.read_df('agg_loss_table', 'agg_id')
         alt_df['rlz_id'] = rlz_id[alt_df.event_id.to_numpy()]
-        smap = parallel.Starmap(post_risk, h5=self.datastore.hdf5)
-        num_curves = K * self.R * self.L
-        blocksize = numpy.ceil(num_curves / (oq.concurrent_tasks or 1))
-        krl_losses = []
+
         with self.monitor('agg_losses and agg_curves', measuremem=True):
+            smap = parallel.Starmap(post_risk, h5=self.datastore.hdf5)
+            num_curves = K * self.R * self.L
+            blocksize = numpy.ceil(num_curves / (oq.concurrent_tasks or 1))
+            krl_losses = []
             agg_losses = numpy.zeros((K, self.R, self.L), F32)
             agg_curves = numpy.zeros((K, self.R, self.L, P), F32)
             gb = alt_df.groupby([alt_df.index, alt_df.rlz_id])
@@ -131,12 +132,12 @@ class PostRiskCalculator(base.RiskCalculator):
                     if len(krl_losses) >= blocksize:
                         smap.submit((builder, krl_losses))
                         krl_losses[:] = []
-        if krl_losses:
-            smap.submit((builder, krl_losses))
-        for krl, arr in smap.reduce().items():
-            agg_curves[krl] = arr
-        self.datastore['agg_losses-rlzs'] = agg_losses
-        self.datastore['agg_curves-rlzs'] = agg_curves
+            if krl_losses:
+                smap.submit((builder, krl_losses))
+            for krl, arr in smap.reduce().items():
+                agg_curves[krl] = arr
+            self.datastore['agg_losses-rlzs'] = agg_losses
+            self.datastore['agg_curves-rlzs'] = agg_curves
 
         units = self.datastore['cost_calculator'].get_units(oq.loss_names)
         set_rlzs_stats(self.datastore, 'agg_curves',
