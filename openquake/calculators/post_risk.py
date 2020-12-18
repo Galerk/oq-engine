@@ -117,13 +117,13 @@ class PostRiskCalculator(base.RiskCalculator):
         with self.monitor('agg_losses and agg_curves', measuremem=True):
             smap = parallel.Starmap(post_risk, h5=self.datastore.hdf5)
             num_curves = K * self.R * self.L
-            blocksize = numpy.ceil(num_curves / (oq.concurrent_tasks or 1))
+            blocksize = int(numpy.ceil(num_curves/(oq.concurrent_tasks or 1)))
             krl_losses = []
             agg_losses = numpy.zeros((K, self.R, self.L), F32)
             agg_curves = numpy.zeros((K, self.R, self.L, P), F32)
             gb = alt_df.groupby([alt_df.index, alt_df.rlz_id])
-            logging.info('Computing up to %d/%d curves per task',
-                         blocksize, num_curves)
+            logging.info('Computing up to {:_d}/{:_d} curves per task'.
+                         format(blocksize, num_curves))
             for (k, r), df in gb:
                 for l, lname in enumerate(oq.loss_names):
                     krl = k, r, l
