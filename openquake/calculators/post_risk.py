@@ -103,15 +103,17 @@ class PostRiskCalculator(base.RiskCalculator):
         rlz_id = self.datastore['events']['rlz_id']
         alt_df = self.datastore.read_df('agg_loss_table', 'agg_id')
         alt_df['rlz_id'] = rlz_id[alt_df.event_id.to_numpy()]
-        agg_losses = self.datastore.create_dset(
-            'agg_losses-rlzs', F32, (K, self.R, self.L))
-        agg_curves = self.datastore.create_dset(
-            'agg_curves-rlzs', F32, (K, self.R, self.L, P))
+        agg_losses = numpy.zeros((K, self.R, self.L), F32)
+        agg_curves = numpy.zeros((K, self.R, self.L, P), F32)
         with self.monitor('agg_losses and agg_curves', measuremem=True):
-            for (k, r), df in alt_df.groupby([alt_df.index, alt_df.rlz_id]):
+            gb = alt_df.groupby([alt_df.index, alt_df.rlz_id])
+            logging.info('Computing agg_losses and agg_curves')
+            for (k, r), df in gb:
                 for l, lname in enumerate(oq.loss_names):
                     agg_losses[k, r, l] = df[lname].sum() * oq.ses_ratio
                     agg_curves[k, r, l] = builder.build_curves(df[lname], r)
+        self.datastore['agg_losses-rlzs'] = agg_losses
+        self.datastore['agg_curves-rlzs'] = agg_curves
 
         units = self.datastore['cost_calculator'].get_units(oq.loss_names)
         set_rlzs_stats(self.datastore, 'agg_curves',
